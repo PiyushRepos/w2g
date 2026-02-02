@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { io, Socket } from "socket.io-client"
-
-let socket: Socket | null = null
+import { socket } from "../lib/socket"
 
 export default function RoomPage() {
   const { roomId } = useParams<{ roomId: string }>()
@@ -11,12 +9,12 @@ export default function RoomPage() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [isHost, setIsHost] = useState(false)
   const [userCount, setUserCount] = useState(1)
-  const [videoUrl, setVideoUrl] = useState("")
   const [copied, setCopied] = useState(false)
   const [roomNotFound, setRoomNotFound] = useState(false)
 
-  // Flag to prevent re-emitting events when syncing from server
+  // Sync state tracking
   const isSyncingRef = useRef(false)
+  const lastSyncTimeRef = useRef(0)
 
   useEffect(() => {
     if (!roomId) {
@@ -24,17 +22,10 @@ export default function RoomPage() {
       return
     }
 
-    // Initialize socket connection if not already connected
-    if (!socket) {
-      socket = io("http://localhost:3000")
-    }
-
     const video = videoRef.current
     if (!video) return
 
-    // ALWAYS fetch room state from server (works for both creators and joiners)
-    // This ensures shared links and page refreshes work correctly
-    // Creator already joined via create-room event, but we still fetch state for consistency
+    // Join room and get initial state
     socket.emit("join-room", { roomId }, (response: any) => {
       if (!response.success) {
         setRoomNotFound(true)
@@ -43,89 +34,77 @@ export default function RoomPage() {
 
       const { roomState } = response
       setIsHost(roomState.isHost)
-      setVideoUrl(roomState.videoUrl)
       setUserCount(roomState.userCount)
 
-      // CRITICAL: Sync video immediately with server state
-      video.src = roomState.videoUrl
-      video.currentTime = roomState.currentTime
-
-      if (roomState.isPlaying) {
-        video.play()
+      // Sync video immediately
+      if (video.src !== roomState.videoUrl) {
+        video.src = roomState.videoUrl
       }
+
+      // Set time and play state
+      setTimeout(() => {
+        video.currentTime = roomState.currentTime
+        if (roomState.isPlaying) {
+          video.play().catch(() => {})
+        } else {
+          video.pause()
+        }
+      }, 100)
     })
 
     // ==================== HOST EVENT HANDLERS ====================
-    // These only fire if user is host - emit to server for sync
-
     const handlePlay = () => {
       if (!isHost || isSyncingRef.current) return
-
-      socket?.emit("play", {
-        roomId,
-        currentTime: video?.currentTime || 0,
-      })
+      socket.emit("play", { roomId, currentTime: video.currentTime })
     }
 
     const handlePause = () => {
       if (!isHost || isSyncingRef.current) return
-
-      socket?.emit("pause", {
-        roomId,
-        currentTime: video?.currentTime || 0,
-      })
+      socket.emit("pause", { roomId, currentTime: video.currentTime })
     }
 
     const handleSeeked = () => {
       if (!isHost || isSyncingRef.current) return
-
-      socket?.emit("seek", {
-        roomId,
-        currentTime: video?.currentTime || 0,
-      })
+      socket.emit("seek", { roomId, currentTime: video.currentTime })
     }
 
     // ==================== SOCKET EVENT LISTENERS ====================
-    // These fire for ALL users (host + viewers) to sync state
+    const syncVideo = (currentTime: number, shouldPlay?: boolean) => {
+      isSyncingRef.current = true
+
+      const timeDiff = Math.abs(video.currentTime - currentTime)
+
+      // Only seek if difference is significant (> 0.5 seconds)
+      if (timeDiff > 0.5) {
+        video.currentTime = currentTime
+      }
+
+      if (shouldPlay !== undefined) {
+        if (shouldPlay) {
+          video.play().catch(() => {})
+        } else {
+          video.pause()
+        }
+      }
+
+      setTimeout(() => {
+        isSyncingRef.current = false
+      }, 50)
+    }
 
     socket.on("play-event", ({ currentTime }: { currentTime: number }) => {
       if (!video) return
-
-      // Set flag to prevent re-emitting this event
-      isSyncingRef.current = true
-
-      video.currentTime = currentTime
-      video.play()
-
-      // Reset flag after a short delay
-      setTimeout(() => {
-        isSyncingRef.current = false
-      }, 100)
+      syncVideo(currentTime, true)
     })
 
     socket.on("pause-event", ({ currentTime }: { currentTime: number }) => {
       if (!video) return
-
-      isSyncingRef.current = true
-
-      video.currentTime = currentTime
-      video.pause()
-
-      setTimeout(() => {
-        isSyncingRef.current = false
-      }, 100)
+      syncVideo(currentTime, false)
     })
 
     socket.on("seek-event", ({ currentTime }: { currentTime: number }) => {
       if (!video) return
-
-      isSyncingRef.current = true
-
-      video.currentTime = currentTime
-
-      setTimeout(() => {
-        isSyncingRef.current = false
-      }, 100)
+      syncVideo(currentTime)
     })
 
     socket.on("user-count-update", ({ userCount }: { userCount: number }) => {
@@ -133,13 +112,12 @@ export default function RoomPage() {
     })
 
     socket.on("host-changed", ({ newHostId }: { newHostId: string }) => {
-      // Update host status if this user became the new host
       if (socket?.id === newHostId) {
         setIsHost(true)
       }
     })
 
-    // Attach video event listeners (only if host)
+    // Attach video event listeners
     if (video) {
       video.addEventListener("play", handlePlay)
       video.addEventListener("pause", handlePause)
@@ -154,11 +132,11 @@ export default function RoomPage() {
         video.removeEventListener("seeked", handleSeeked)
       }
 
-      socket?.off("play-event")
-      socket?.off("pause-event")
-      socket?.off("seek-event")
-      socket?.off("user-count-update")
-      socket?.off("host-changed")
+      socket.off("play-event")
+      socket.off("pause-event")
+      socket.off("seek-event")
+      socket.off("user-count-update")
+      socket.off("host-changed")
     }
   }, [roomId, isHost, navigate])
 
@@ -224,8 +202,9 @@ export default function RoomPage() {
           <video
             ref={videoRef}
             className="w-full aspect-video bg-black"
-            controls={isHost} // Only host gets controls
+            controls={isHost}
             controlsList="nodownload"
+            playsInline
           />
 
           {/* Status Bar */}

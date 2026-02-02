@@ -1,8 +1,6 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { io } from "socket.io-client"
-
-const socket = io("http://localhost:3000")
+import { socket } from "../lib/socket"
 
 export default function LandingPage() {
   const [videoUrl, setVideoUrl] = useState("")
