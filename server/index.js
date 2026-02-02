@@ -146,6 +146,21 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("seek-event", { currentTime })
   })
 
+  // FULLSCREEN EVENT (Host only)
+  socket.on("fullscreen", ({ roomId, isFullscreen }) => {
+    const room = rooms.get(roomId)
+
+    if (!room || room.host !== socket.id) {
+      console.log(`Unauthorized fullscreen attempt by ${socket.id}`)
+      return
+    }
+
+    console.log(`Room ${roomId}: Fullscreen ${isFullscreen ? "ON" : "OFF"}`)
+
+    // Broadcast to ALL users in room (including host for confirmation)
+    io.to(roomId).emit("fullscreen-event", { isFullscreen })
+  })
+
   // DISCONNECT
   socket.on("disconnect", () => {
     console.log(`User disconnected: ${socket.id}`)

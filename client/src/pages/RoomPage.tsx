@@ -11,6 +11,7 @@ export default function RoomPage() {
   const [userCount, setUserCount] = useState(1)
   const [copied, setCopied] = useState(false)
   const [roomNotFound, setRoomNotFound] = useState(false)
+  const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(false)
 
   // Sync state tracking
   const isSyncingRef = useRef(false)
@@ -67,6 +68,21 @@ export default function RoomPage() {
       socket.emit("seek", { roomId, currentTime: video.currentTime })
     }
 
+    const handleFullscreenChange = () => {
+      if (!isHost || isSyncingRef.current) return
+
+      // Check if video is currently in fullscreen
+      const isFullscreen = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      )
+
+      console.log("🖥️ Host fullscreen changed:", isFullscreen)
+      socket.emit("fullscreen", { roomId, isFullscreen })
+    }
+
     // ==================== SOCKET EVENT LISTENERS ====================
     const syncVideo = (currentTime: number, shouldPlay?: boolean) => {
       isSyncingRef.current = true
@@ -116,12 +132,78 @@ export default function RoomPage() {
       }
     })
 
+    socket.on(
+      "fullscreen-event",
+      ({ isFullscreen }: { isFullscreen: boolean }) => {
+        if (!video) return
+
+        console.log("📺 Received fullscreen-event:", isFullscreen)
+
+        isSyncingRef.current = true
+
+        if (isFullscreen) {
+          if (isHost) {
+            // Host's own client receives the event, should still attempt fullscreen
+            console.log("🔲 Host: Attempting to enter fullscreen...")
+            const enterFullscreen = async () => {
+              try {
+                if (video.requestFullscreen) {
+                  await video.requestFullscreen()
+                } else if ((video as any).webkitRequestFullscreen) {
+                  await (video as any).webkitRequestFullscreen()
+                } else if ((video as any).mozRequestFullScreen) {
+                  await (video as any).mozRequestFullScreen()
+                } else if ((video as any).msRequestFullscreen) {
+                  await (video as any).msRequestFullscreen()
+                }
+                console.log("✅ Host: Fullscreen entered successfully")
+              } catch (err) {
+                console.warn("⚠️ Host: Fullscreen blocked by browser:", err)
+                console.log(
+                  "💡 Host: User needs to interact with the page first (click/tap)",
+                )
+              }
+            }
+            enterFullscreen()
+          } else {
+            // Viewer: Show prompt for viewers to click and enter fullscreen
+            setShowFullscreenPrompt(true)
+            console.log("🔲 Viewer: Showing fullscreen prompt")
+          }
+        } else {
+          // Exit fullscreen works without user gesture
+          console.log("↩️ Exiting fullscreen...")
+          setShowFullscreenPrompt(false) // Hide prompt if showing
+
+          if (document.exitFullscreen) {
+            document.exitFullscreen().catch(() => {})
+          } else if ((document as any).webkitExitFullscreen) {
+            ;(document as any).webkitExitFullscreen()
+          } else if ((document as any).mozCancelFullScreen) {
+            ;(document as any).mozCancelFullScreen()
+          } else if ((document as any).msExitFullscreen) {
+            ;(document as any).msExitFullscreen()
+          }
+        }
+
+        setTimeout(() => {
+          isSyncingRef.current = false
+        }, 100)
+      },
+    )
+
     // Attach video event listeners
     if (video) {
       video.addEventListener("play", handlePlay)
       video.addEventListener("pause", handlePause)
       video.addEventListener("seeked", handleSeeked)
     }
+
+    // Attach fullscreen event listener to document
+    document.addEventListener("fullscreenchange", handleFullscreenChange)
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange)
+    document.addEventListener("mozfullscreenchange", handleFullscreenChange)
+    document.addEventListener("MSFullscreenChange", handleFullscreenChange)
 
     // Cleanup
     return () => {
@@ -136,6 +218,18 @@ export default function RoomPage() {
       socket.off("seek-event")
       socket.off("user-count-update")
       socket.off("host-changed")
+      socket.off("fullscreen-event")
+
+      document.removeEventListener("fullscreenchange", handleFullscreenChange)
+      document.removeEventListener(
+        "webkitfullscreenchange",
+        handleFullscreenChange,
+      )
+      document.removeEventListener(
+        "mozfullscreenchange",
+        handleFullscreenChange,
+      )
+      document.removeEventListener("MSFullscreenChange", handleFullscreenChange)
     }
   }, [roomId, isHost, navigate])
 
@@ -168,6 +262,54 @@ export default function RoomPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black p-4">
       <div className="max-w-6xl mx-auto">
+        {/* Fullscreen Sync Prompt for Viewers */}
+        {showFullscreenPrompt && !isHost && (
+          <div className="mb-4 bg-indigo-600/90 backdrop-blur-sm border border-indigo-500/50 rounded-xl p-4 shadow-lg animate-in slide-in-from-top duration-300">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">🖥️</span>
+                <div>
+                  <p className="text-white font-semibold text-sm">
+                    Host entered fullscreen
+                  </p>
+                  <p className="text-indigo-100 text-xs">
+                    Click to sync fullscreen mode
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const video = videoRef.current
+                    if (!video) return
+
+                    if (video.requestFullscreen) {
+                      video.requestFullscreen()
+                    } else if ((video as any).webkitRequestFullscreen) {
+                      ;(video as any).webkitRequestFullscreen()
+                    } else if ((video as any).mozRequestFullScreen) {
+                      ;(video as any).mozRequestFullScreen()
+                    } else if ((video as any).msRequestFullscreen) {
+                      ;(video as any).msRequestFullscreen()
+                    }
+
+                    setShowFullscreenPrompt(false)
+                  }}
+                  className="px-4 py-2 bg-white hover:bg-gray-100 text-indigo-600 font-semibold rounded-lg transition-all text-sm"
+                >
+                  Enter Fullscreen
+                </button>
+                <button
+                  onClick={() => setShowFullscreenPrompt(false)}
+                  className="px-3 py-2 text-white hover:bg-indigo-700/50 rounded-lg transition-all text-sm"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
