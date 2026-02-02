@@ -14,7 +14,6 @@ export default function RoomPage() {
 
   // Sync state tracking
   const isSyncingRef = useRef(false)
-  const lastSyncTimeRef = useRef(0)
 
   useEffect(() => {
     if (!roomId) {
