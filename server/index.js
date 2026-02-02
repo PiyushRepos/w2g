@@ -168,24 +168,27 @@ io.on("connection", (socket) => {
     // Remove user from all rooms and clean up
     rooms.forEach((room, roomId) => {
       if (room.users.has(socket.id)) {
+        const wasHost = room.host === socket.id
         room.users.delete(socket.id)
 
         // If room is empty, delete it
         if (room.users.size === 0) {
           rooms.delete(roomId)
           console.log(`Room ${roomId} deleted (empty)`)
+        } else if (wasHost) {
+          // HOST LEFT: Close the room and notify all viewers
+          console.log(`Host left room ${roomId} - closing room`)
+
+          // Notify all remaining users that room is closing
+          io.to(roomId).emit("room-closed", {
+            reason: "Host left the room",
+          })
+
+          // Delete the room
+          rooms.delete(roomId)
+          console.log(`Room ${roomId} closed due to host leaving`)
         } else {
-          // If host left, assign new host (first remaining user)
-          if (room.host === socket.id) {
-            const newHost = room.users.keys().next().value
-            room.host = newHost
-            console.log(`New host for room ${roomId}: ${newHost}`)
-
-            // Notify all users about host change
-            io.to(roomId).emit("host-changed", { newHostId: newHost })
-          }
-
-          // Update user count
+          // Non-host left: Just update user count
           io.to(roomId).emit("user-count-update", {
             userCount: room.users.size,
           })

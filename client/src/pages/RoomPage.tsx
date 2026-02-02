@@ -12,6 +12,7 @@ export default function RoomPage() {
   const [copied, setCopied] = useState(false)
   const [roomNotFound, setRoomNotFound] = useState(false)
   const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(false)
+  const [roomClosedReason, setRoomClosedReason] = useState<string | null>(null)
 
   // Sync state tracking
   const isSyncingRef = useRef(false)
@@ -192,6 +193,18 @@ export default function RoomPage() {
       },
     )
 
+    socket.on("room-closed", ({ reason }: { reason: string }) => {
+      console.log("🚪 Room closed:", reason)
+
+      // Set reason to show modal
+      setRoomClosedReason(reason)
+
+      // Redirect after 3 seconds
+      setTimeout(() => {
+        navigate("/")
+      }, 3000)
+    })
+
     // Attach video event listeners
     if (video) {
       video.addEventListener("play", handlePlay)
@@ -219,6 +232,7 @@ export default function RoomPage() {
       socket.off("user-count-update")
       socket.off("host-changed")
       socket.off("fullscreen-event")
+      socket.off("room-closed")
 
       document.removeEventListener("fullscreenchange", handleFullscreenChange)
       document.removeEventListener(
@@ -253,6 +267,34 @@ export default function RoomPage() {
             className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg transition-all"
           >
             Go Home
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Room Closed Modal
+  if (roomClosedReason) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-gray-800/90 backdrop-blur-xl border border-red-500/50 rounded-2xl p-8 text-center shadow-2xl">
+          <div className="mb-6">
+            <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span className="text-5xl">👋</span>
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-2">Room Closed</h2>
+            <p className="text-red-400 text-lg font-medium mb-4">
+              {roomClosedReason}
+            </p>
+            <p className="text-gray-400 text-sm">
+              Redirecting to home page in 3 seconds...
+            </p>
+          </div>
+          <button
+            onClick={() => navigate("/")}
+            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg transition-all w-full"
+          >
+            Go Home Now
           </button>
         </div>
       </div>
