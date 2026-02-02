@@ -3,6 +3,10 @@ import cors from "cors"
 import { createServer } from "http"
 import { Server } from "socket.io"
 import { nanoid } from "nanoid"
+import dotenv from "dotenv"
+
+// Load environment variables
+dotenv.config()
 
 const app = express()
 const httpServer = createServer(app)
@@ -10,7 +14,7 @@ const httpServer = createServer(app)
 // Socket.IO server with CORS configuration
 const io = new Server(httpServer, {
   cors: {
-    origin: "http://localhost:5173", // Vite default port
+    origin: process.env.CLIENT_URL || "http://localhost:5173",
     methods: ["GET", "POST"],
   },
 })
@@ -176,7 +180,7 @@ io.on("connection", (socket) => {
   })
 })
 
-const PORT = 3000
+const PORT = process.env.PORT || 3000
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
 })
